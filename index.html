@@ -33,12 +33,12 @@
       color: #f5f5f5;
     }
     h2.chapter-title {
-      margin: 20px 0 10px;
+      margin: 30px 0 15px;
       font-size: 20px;
       color: #ffcc00;
     }
     input, button {
-      margin: 10px;
+      margin: 8px;
       padding: 10px;
       font-size: 16px;
       border-radius: 5px;
@@ -56,53 +56,54 @@
     button:hover {
       background: #e91e63;
     }
+    .chapter-form {
+      margin-bottom: 15px;
+    }
   </style>
 </head>
 <body>
   <h1>Chapters Viewer</h1>
   
-  <div>
-    <input type="text" id="baseUrl" placeholder="Enter base URL (e.g., https://example.com/)" required>
-    <input type="number" id="totalChapters" placeholder="Enter number of pages" required>
-    <input type="text" id="chapterName" placeholder="Optional: Chapter Name (e.g., Chapter 1)">
-    <button onclick="loadImages()">Load Images</button>
+  <div class="chapter-form">
+    <input type="text" id="baseUrl" placeholder="Base URL (e.g., https://example.com/ch1-)" required>
+    <input type="number" id="totalPages" placeholder="Number of pages" required>
+    <button onclick="loadChapter()">Load Chapter</button>
   </div>
   
-  <button onclick="downloadPDF()">Download as PDF</button>
+  <button onclick="downloadPDF()">Download All as PDF</button>
 
   <div class="container" id="imageContainer">
-    <h2>Enter details and click 'Load Images'</h2>
+    <h2>Enter details and click 'Load Chapter'</h2>
   </div>
 
   <script>
     let imageElements = [];
+    let chapterCounter = 0; // keeps track of chapter numbers
 
-    async function loadImages() {
+    async function loadChapter() {
       const container = document.getElementById('imageContainer');
 
       let baseUrl = document.getElementById('baseUrl').value.trim();
-      const totalPages = parseInt(document.getElementById('totalChapters').value);
-      const chapterName = document.getElementById('chapterName').value.trim() || "New Chapter";
+      const totalPages = parseInt(document.getElementById('totalPages').value);
       const formats = ["jpg", "jpeg", "png", "webp"];
 
       if (!baseUrl || isNaN(totalPages) || totalPages <= 0) {
-        alert("Please enter a valid URL and number of pages.");
+        alert("Please enter valid Base URL and Number of Pages.");
         return;
       }
 
-      if (!baseUrl.endsWith('/')) {
-        baseUrl += '/';
-      }
+      chapterCounter++; // increment chapter number
+      let chapterName = `Chapter ${chapterCounter}`;
 
-      console.log("Starting image loading...");
+      console.log(`Loading ${chapterName}...`);
 
-      let loadedImages = 0;
-
-      // Add chapter heading before images
+      // Add chapter heading
       let heading = document.createElement("h2");
       heading.className = "chapter-title";
       heading.textContent = chapterName;
       container.appendChild(heading);
+
+      let loadedImages = 0;
 
       for (let page = 1; page <= totalPages; page++) {
         let img = document.createElement('img');
@@ -117,7 +118,7 @@
           if (exists) {
             img.src = testSrc;
             container.appendChild(img);
-            imageElements.push(img);
+            imageElements.push({ chapter: chapterName, element: img });
             loadedImages++;
             found = true;
             console.log(`Loaded: ${testSrc}`);
@@ -135,7 +136,7 @@
       }
 
       if (loadedImages === 0) {
-        alert("No images were loaded. Please check your URL.");
+        alert(`No images were loaded for ${chapterName}. Please check your URL.`);
       }
     }
 
@@ -150,7 +151,7 @@
 
     async function downloadPDF() {
       if (imageElements.length === 0) {
-        alert("No images loaded. Please load images first.");
+        alert("No chapters loaded. Please load at least one.");
         return;
       }
 
@@ -158,24 +159,18 @@
       let pdf = new jsPDF('p', 'mm', 'a4');
       let imgWidth = 210;
       let pageHeight = 297;
-      let yPosition = 0;
 
       console.log(`Processing ${imageElements.length} images...`);
 
       for (let i = 0; i < imageElements.length; i++) {
-        let img = imageElements[i];
+        let { chapter, element: img } = imageElements[i];
 
         let canvas = await html2canvas(img, { scale: 2 });
         let imgData = canvas.toDataURL('image/jpeg');
         let imgHeight = (canvas.height * imgWidth) / canvas.width;
 
-        if (yPosition + imgHeight > pageHeight) {
-          pdf.addPage();
-          yPosition = 0;
-        }
-
-        pdf.addImage(imgData, 'JPEG', 0, yPosition, imgWidth, imgHeight);
-        yPosition += imgHeight;
+        if (i > 0) pdf.addPage();
+        pdf.addImage(imgData, 'JPEG', 0, 0, imgWidth, imgHeight);
       }
 
       pdf.save("Chapters.pdf");
