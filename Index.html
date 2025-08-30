@@ -4,7 +4,6 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Chapters Viewer & PDF Converter</title>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
   <style>
     body {
@@ -32,8 +31,13 @@
       font-size: 24px;
       color: #f5f5f5;
     }
+    h2.chapter-title {
+      margin: 30px 0 15px;
+      font-size: 20px;
+      color: #ffcc00;
+    }
     input, button {
-      margin: 10px;
+      margin: 8px;
       padding: 10px;
       font-size: 16px;
       border-radius: 5px;
@@ -51,80 +55,68 @@
     button:hover {
       background: #e91e63;
     }
+    .chapter-form {
+      margin-bottom: 15px;
+    }
+    #status {
+      margin-top: 10px;
+      color: #00e676;
+    }
   </style>
 </head>
 <body>
   <h1>Chapters Viewer</h1>
   
-  <div>
-    <input type="text" id="baseUrl" placeholder="Enter base URL (e.g., https://example.com/)" required>
-    <input type="number" id="totalChapters" placeholder="Enter number of chapters/pages" required>
-    <button onclick="loadImages()">Load Images</button>
+  <div class="chapter-form">
+    <input type="text" id="baseUrl" placeholder="Base URL (e.g., https://example.com/ch1-)" required><br>
+    <input type="number" id="startPage" placeholder="Start Page (default 0)" value="0"><br>
+    <input type="number" id="endPage" placeholder="End Page (e.g., 50)" required><br>
+    <button onclick="loadChapter()">Load Chapter</button>
   </div>
   
-  <button onclick="downloadPDF()">Download as PDF</button>
+  <button onclick="downloadPDF()">Download All as PDF</button>
+  <p id="status"></p>
 
   <div class="container" id="imageContainer">
-    <h2>Enter details and click 'Load Images'</h2>
+    <h2>Enter details and click 'Load Chapter'</h2>
   </div>
 
   <script>
     let imageElements = [];
+    let chapterCounter = 0;
 
-    async function loadImages() {
+    async function loadChapter() {
       const container = document.getElementById('imageContainer');
-      container.innerHTML = ''; // Clear previous images
-      imageElements = [];
-
       let baseUrl = document.getElementById('baseUrl').value.trim();
-      const totalChapters = parseInt(document.getElementById('totalChapters').value);
+      const startPage = parseInt(document.getElementById('startPage').value) || 0;
+      const endPage = parseInt(document.getElementById('endPage').value);
       const formats = ["jpg", "jpeg", "png", "webp"];
 
-      if (!baseUrl || isNaN(totalChapters) || totalChapters <= 0) {
-        alert("Please enter a valid URL and number of chapters/pages.");
+      if (!baseUrl || isNaN(endPage) || endPage < startPage) {
+        alert("Please enter a valid Base URL and Page Range.");
         return;
       }
 
-      if (!baseUrl.endsWith('/')) {
-        baseUrl += '/';
-      }
+      chapterCounter++;
+      let chapterName = `Chapter ${chapterCounter}`;
+      let heading = document.createElement("h2");
+      heading.className = "chapter-title";
+      heading.textContent = chapterName;
+      container.appendChild(heading);
 
-      console.log("Starting image loading...");
-
-      let loadedImages = 0;
-
-      for (let chapter = 1; chapter <= totalChapters; chapter++) {
+      for (let page = startPage; page <= endPage; page++) {
         let img = document.createElement('img');
-        img.alt = `Chapter ${chapter}`;
+        img.alt = `${chapterName} - Page ${page}`;
         
-        let found = false;
-
         for (let format of formats) {
-          let testSrc = `${baseUrl}${chapter}.${format}`;
-          let exists = await checkImageExists(testSrc);
-          
-          if (exists) {
+          let testSrc = `${baseUrl}${page}.${format}`;
+          if (await checkImageExists(testSrc)) {
             img.src = testSrc;
             container.appendChild(img);
-            imageElements.push(img);
-            loadedImages++;
-            found = true;
-            console.log(`Loaded: ${testSrc}`);
+            imageElements.push({ chapter: chapterName, src: testSrc });
             break;
           }
         }
-
-        if (!found) {
-          let errorText = document.createElement('p');
-          errorText.style.color = 'red';
-          errorText.textContent = `Image not found: Chapter ${chapter}`;
-          container.appendChild(errorText);
-          console.error(`No valid format found for Chapter ${chapter}`);
-        }
-      }
-
-      if (loadedImages === 0) {
-        alert("No images were loaded. Please check your URL.");
       }
     }
 
@@ -139,36 +131,55 @@
 
     async function downloadPDF() {
       if (imageElements.length === 0) {
-        alert("No images loaded. Please load images first.");
+        alert("No chapters loaded. Please load at least one.");
         return;
       }
 
+      const status = document.getElementById('status');
+      status.textContent = "Generating PDF...";
+      
       const { jsPDF } = window.jspdf;
       let pdf = new jsPDF('p', 'mm', 'a4');
-      let imgWidth = 210;
+      let pageWidth = 210;
       let pageHeight = 297;
-      let yPosition = 0;
 
-      console.log(`Processing ${imageElements.length} images...`);
-
+      let currentChapter = "";
       for (let i = 0; i < imageElements.length; i++) {
-        let img = imageElements[i];
+        let { chapter, src } = imageElements[i];
 
-        let canvas = await html2canvas(img, { scale: 2 });
-        let imgData = canvas.toDataURL('image/jpeg');
-        let imgHeight = (canvas.height * imgWidth) / canvas.width;
-
-        if (yPosition + imgHeight > pageHeight) {
+        if (chapter !== currentChapter) {
+          if (i > 0) pdf.addPage();
+          pdf.setFontSize(20);
+          pdf.text(chapter, 10, 20);
           pdf.addPage();
-          yPosition = 0;
+          currentChapter = chapter;
         }
 
-        pdf.addImage(imgData, 'JPEG', 0, yPosition, imgWidth, imgHeight);
-        yPosition += imgHeight;
+        let img = await loadImage(src);
+        let ratio = img.width / img.height;
+        let imgHeight = pageWidth / ratio;
+        if (imgHeight > pageHeight) {
+          imgHeight = pageHeight;
+          pageWidth = pageHeight * ratio;
+        }
+
+        pdf.addImage(img, 'JPEG', 0, 0, pageWidth, imgHeight);
+        if (i < imageElements.length - 1) pdf.addPage();
+
+        status.textContent = `Processing ${i + 1} of ${imageElements.length} pages...`;
       }
 
       pdf.save("Chapters.pdf");
-      console.log("PDF Downloaded.");
+      status.textContent = "PDF Downloaded!";
+    }
+
+    function loadImage(url) {
+      return new Promise((resolve) => {
+        let img = new Image();
+        img.crossOrigin = "Anonymous";
+        img.onload = () => resolve(img);
+        img.src = url;
+      });
     }
   </script>
 </body>
