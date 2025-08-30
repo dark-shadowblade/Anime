@@ -68,66 +68,72 @@
   <h1>Chapters Viewer</h1>
   
   <div class="chapter-form">
-    <input type="text" id="userInput" placeholder="Enter nhentai Number eg (#665565) "><br>
-    <input type="number" id="startPage" placeholder="Start Page (default 0)" value="0"><br>
-    <input type="number" id="endPage" placeholder="End Page (auto-filled)" required><br>
-    <button onclick="prepareChapter()">Load Chapter</button>
+    <input type="text" id="userInput" placeholder="Enter Sauce Number eg (665565) "><br>
+    <input type="number" id="startPage" placeholder="Start Page (default 1)"><br>
+    <input type="number" id="endPage" placeholder="Total Page (auto-filled)" required><br>
+    
+    <button onclick="loadChapter()">Load Chapter</button>
   </div>
   
   <button onclick="downloadPDF()">Download All as PDF</button>
   <p id="status"></p>
 
   <div class="container" id="imageContainer">
-    <h2>Enter details and click 'Load Chapter'</h2>
+    <h2>Enter ID and wait a moment...</h2>
   </div>
 
   <script>
     let imageElements = [];
     let chapterCounter = 0;
     let currentGalleryID = "";
+    let serverCache = {}; // cache servers by gallery ID
 
-    async function prepareChapter() {
-      const input = document.getElementById('userInput').value.trim();
-      if (!input) {
-        alert("Please enter a nhentai link or gallery ID.");
-        return;
+    // Auto-fetch when user enters/pastes ID
+    document.getElementById("userInput").addEventListener("input", async function () {
+      const input = this.value.trim();
+      let code = input.replace(/[^0-9]/g, "");
+      
+      if (code.length >= 6) { // only when we have 6+ digits
+        try {
+          const proxy = "https://api.allorigins.win/raw?url=";
+          const apiUrl = `https://nhentai.net/api/gallery/${code}`;
+          const res = await fetch(proxy + encodeURIComponent(apiUrl));
+          if (!res.ok) throw new Error("API request failed");
+
+          const data = await res.json();
+          currentGalleryID = data.media_id;
+          const totalPages = data.num_pages;
+
+          const startPageInput = document.getElementById('startPage');
+          const endPageInput = document.getElementById('endPage');
+
+          if (!startPageInput.value) startPageInput.value = 1; // default page 1
+          endPageInput.value = totalPages; // always show max total pages
+        } catch (err) {
+          console.error("Failed to fetch gallery data", err);
+        }
       }
-
-      let code = input.replace(/[^0-9]/g, ""); 
-      if (!code) {
-        alert("Invalid input.");
-        return;
-      }
-
-      try {
-        const proxy = "https://api.allorigins.win/raw?url=";
-        const apiUrl = `https://nhentai.net/api/gallery/${code}`;
-        const res = await fetch(proxy + encodeURIComponent(apiUrl));
-        if (!res.ok) throw new Error("API request failed");
-
-        const data = await res.json();
-        currentGalleryID = data.media_id;
-        const totalPages = data.num_pages;
-
-        document.getElementById('startPage').value = 0;
-        document.getElementById('endPage').value = totalPages;
-
-        loadChapter();
-      } catch (err) {
-        alert("Failed to fetch gallery data.");
-        console.error(err);
-      }
-    }
+    });
 
     async function loadChapter() {
       const container = document.getElementById('imageContainer');
-      const startPage = parseInt(document.getElementById('startPage').value) || 0;
+      const startPage = parseInt(document.getElementById('startPage').value) || 1;
       const endPage = parseInt(document.getElementById('endPage').value);
-      const formats = ["jpg", "jpeg", "png", "webp"];
 
       if (!currentGalleryID || isNaN(endPage) || endPage < startPage) {
         alert("Please enter valid details.");
         return;
+      }
+
+      // detect & cache server for this gallery
+      let server = serverCache[currentGalleryID];
+      if (!server) {
+        server = await detectServer(currentGalleryID);
+        if (!server) {
+          alert("Could not detect server for this gallery.");
+          return;
+        }
+        serverCache[currentGalleryID] = server;
       }
 
       chapterCounter++;
@@ -137,9 +143,10 @@
       heading.textContent = chapterName;
       container.appendChild(heading);
 
-      const baseUrl = `https://i9.nhentai.net/galleries/${currentGalleryID}/`;
+      const formats = ["jpg", "png", "webp"];
+      const baseUrl = `https://${server}.nhentai.net/galleries/${currentGalleryID}/`;
 
-      for (let page = startPage + 1; page <= endPage; page++) {
+      for (let page = startPage; page <= endPage; page++) {
         let img = document.createElement('img');
         img.alt = `${chapterName} - Page ${page}`;
         
@@ -153,6 +160,30 @@
           }
         }
       }
+    }
+
+    async function detectServer(galleryId) {
+      const servers = ["i3", "i6", "i7", "i8", "i9"];
+      const formats = ["jpg", "png", "webp"];
+      const testUrls = [];
+
+      for (let server of servers) {
+        for (let format of formats) {
+          testUrls.push({ url: `https://${server}.nhentai.net/galleries/${galleryId}/1.${format}`, server });
+        }
+      }
+
+      const checks = await Promise.allSettled(
+        testUrls.map(item => checkImageExists(item.url).then(ok => ({ ok, ...item })))
+      );
+
+      for (let result of checks) {
+        if (result.status === "fulfilled" && result.value.ok) {
+          return result.value.server;
+        }
+      }
+
+      return null;
     }
 
     function checkImageExists(url) {
@@ -192,13 +223,16 @@
 
         let img = await loadImage(src);
         let ratio = img.width / img.height;
+        let imgWidth = pageWidth;
         let imgHeight = pageWidth / ratio;
+
         if (imgHeight > pageHeight) {
           imgHeight = pageHeight;
-          pageWidth = pageHeight * ratio;
+          imgWidth = pageHeight * ratio;
         }
 
-        pdf.addImage(img, 'JPEG', 0, 0, pageWidth, imgHeight);
+        let format = src.endsWith(".png") ? "PNG" : "JPEG";
+        pdf.addImage(img, format, 0, 0, imgWidth, imgHeight);
         if (i < imageElements.length - 1) pdf.addPage();
 
         status.textContent = `Processing ${i + 1} of ${imageElements.length} pages...`;
