@@ -68,10 +68,10 @@
   <h1>Chapters Viewer</h1>
   
   <div class="chapter-form">
-    <input type="text" id="baseUrl" placeholder="Base URL (e.g., https://example.com/ch1-)" required><br>
+    <input type="text" id="userInput" placeholder="Enter nhentai Number eg (#665565) "><br>
     <input type="number" id="startPage" placeholder="Start Page (default 0)" value="0"><br>
-    <input type="number" id="endPage" placeholder="End Page (e.g., 50)" required><br>
-    <button onclick="loadChapter()">Load Chapter</button>
+    <input type="number" id="endPage" placeholder="Total Page (auto-filled)" required><br>
+    <button onclick="prepareChapter()">Load Chapter</button>
   </div>
   
   <button onclick="downloadPDF()">Download All as PDF</button>
@@ -84,17 +84,61 @@
   <script>
     let imageElements = [];
     let chapterCounter = 0;
+    let currentGalleryID = "";
+    let serverCache = {}; // cache servers by gallery ID
+
+    async function prepareChapter() {
+      const input = document.getElementById('userInput').value.trim();
+      if (!input) {
+        alert("Please enter a nhentai link or gallery ID.");
+        return;
+      }
+
+      let code = input.replace(/[^0-9]/g, ""); 
+      if (!code) {
+        alert("Invalid input.");
+        return;
+      }
+
+      try {
+        const proxy = "https://api.allorigins.win/raw?url=";
+        const apiUrl = `https://nhentai.net/api/gallery/${code}`;
+        const res = await fetch(proxy + encodeURIComponent(apiUrl));
+        if (!res.ok) throw new Error("API request failed");
+
+        const data = await res.json();
+        currentGalleryID = data.media_id;
+        const totalPages = data.num_pages;
+
+        document.getElementById('startPage').value = 0;
+        document.getElementById('endPage').value = totalPages;
+
+        loadChapter();
+      } catch (err) {
+        alert("Failed to fetch gallery data.");
+        console.error(err);
+      }
+    }
 
     async function loadChapter() {
       const container = document.getElementById('imageContainer');
-      let baseUrl = document.getElementById('baseUrl').value.trim();
       const startPage = parseInt(document.getElementById('startPage').value) || 0;
       const endPage = parseInt(document.getElementById('endPage').value);
-      const formats = ["jpg", "jpeg", "png", "webp"];
 
-      if (!baseUrl || isNaN(endPage) || endPage < startPage) {
-        alert("Please enter a valid Base URL and Page Range.");
+      if (!currentGalleryID || isNaN(endPage) || endPage < startPage) {
+        alert("Please enter valid details.");
         return;
+      }
+
+      // detect & cache server for this gallery
+      let server = serverCache[currentGalleryID];
+      if (!server) {
+        server = await detectServer(currentGalleryID);
+        if (!server) {
+          alert("Could not detect server for this gallery.");
+          return;
+        }
+        serverCache[currentGalleryID] = server;
       }
 
       chapterCounter++;
@@ -104,7 +148,10 @@
       heading.textContent = chapterName;
       container.appendChild(heading);
 
-      for (let page = startPage; page <= endPage; page++) {
+      const formats = ["jpg", "png", "webp"];
+      const baseUrl = `https://${server}.nhentai.net/galleries/${currentGalleryID}/`;
+
+      for (let page = startPage + 1; page <= endPage; page++) {
         let img = document.createElement('img');
         img.alt = `${chapterName} - Page ${page}`;
         
@@ -118,6 +165,30 @@
           }
         }
       }
+    }
+
+    async function detectServer(galleryId) {
+      const servers = ["i3", "i6", "i9"];
+      const formats = ["jpg", "png", "webp"];
+      const testUrls = [];
+
+      for (let server of servers) {
+        for (let format of formats) {
+          testUrls.push({ url: `https://${server}.nhentai.net/galleries/${galleryId}/1.${format}`, server });
+        }
+      }
+
+      const checks = await Promise.allSettled(
+        testUrls.map(item => checkImageExists(item.url).then(ok => ({ ok, ...item })))
+      );
+
+      for (let result of checks) {
+        if (result.status === "fulfilled" && result.value.ok) {
+          return result.value.server;
+        }
+      }
+
+      return null;
     }
 
     function checkImageExists(url) {
