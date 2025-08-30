@@ -1,0 +1,257 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Chapters Viewer & PDF Converter</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      margin: 0;
+      padding: 0;
+      background-color: #121212;
+      color: #ffffff;
+      text-align: center;
+    }
+    .container {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      width: 100%;
+    }
+    img {
+      max-width: 100%;
+      height: auto;
+      margin-bottom: 5px;
+      box-shadow: 0 2px 4px rgba(0, 0, 0, 0.8);
+    }
+    h1 {
+      margin: 20px;
+      font-size: 24px;
+      color: #f5f5f5;
+    }
+    h2.chapter-title {
+      margin: 30px 0 15px;
+      font-size: 20px;
+      color: #ffcc00;
+    }
+    input, button {
+      margin: 8px;
+      padding: 10px;
+      font-size: 16px;
+      border-radius: 5px;
+      border: none;
+    }
+    input {
+      width: 80%;
+      max-width: 400px;
+    }
+    button {
+      background: #ff4081;
+      color: white;
+      cursor: pointer;
+    }
+    button:hover {
+      background: #e91e63;
+    }
+    .chapter-form {
+      margin-bottom: 15px;
+    }
+    #status {
+      margin-top: 10px;
+      color: #00e676;
+    }
+  </style>
+</head>
+<body>
+  <h1>Chapters Viewer</h1>
+  
+  <div class="chapter-form">
+    <input type="text" id="userInput" placeholder="Enter nhentai Number eg (#665565) "><br>
+    <input type="number" id="startPage" placeholder="Start Page (default 0)" value="0"><br>
+    <input type="number" id="endPage" placeholder="End Page (auto-filled)" required><br>
+    <button onclick="prepareChapter()">Load Chapter</button>
+  </div>
+  
+  <button onclick="downloadPDF()">Download All as PDF</button>
+  <p id="status"></p>
+
+  <div class="container" id="imageContainer">
+    <h2>Enter details and click 'Load Chapter'</h2>
+  </div>
+
+  <script>
+    let imageElements = [];
+    let chapterCounter = 0;
+    let currentGalleryID = "";
+    let serverCache = {}; // cache servers by gallery ID
+
+    async function prepareChapter() {
+      const input = document.getElementById('userInput').value.trim();
+      if (!input) {
+        alert("Please enter a nhentai link or gallery ID.");
+        return;
+      }
+
+      let code = input.replace(/[^0-9]/g, ""); 
+      if (!code) {
+        alert("Invalid input.");
+        return;
+      }
+
+      try {
+        const proxy = "https://api.allorigins.win/raw?url=";
+        const apiUrl = `https://nhentai.net/api/gallery/${code}`;
+        const res = await fetch(proxy + encodeURIComponent(apiUrl));
+        if (!res.ok) throw new Error("API request failed");
+
+        const data = await res.json();
+        currentGalleryID = data.media_id;
+        const totalPages = data.num_pages;
+
+        document.getElementById('startPage').value = 0;
+        document.getElementById('endPage').value = totalPages;
+
+        loadChapter();
+      } catch (err) {
+        alert("Failed to fetch gallery data.");
+        console.error(err);
+      }
+    }
+
+    async function loadChapter() {
+      const container = document.getElementById('imageContainer');
+      const startPage = parseInt(document.getElementById('startPage').value) || 0;
+      const endPage = parseInt(document.getElementById('endPage').value);
+
+      if (!currentGalleryID || isNaN(endPage) || endPage < startPage) {
+        alert("Please enter valid details.");
+        return;
+      }
+
+      // detect & cache server for this gallery
+      let server = serverCache[currentGalleryID];
+      if (!server) {
+        server = await detectServer(currentGalleryID);
+        if (!server) {
+          alert("Could not detect server for this gallery.");
+          return;
+        }
+        serverCache[currentGalleryID] = server;
+      }
+
+      chapterCounter++;
+      let chapterName = `Chapter ${chapterCounter}`;
+      let heading = document.createElement("h2");
+      heading.className = "chapter-title";
+      heading.textContent = chapterName;
+      container.appendChild(heading);
+
+      const formats = ["jpg", "png", "webp"];
+      const baseUrl = `https://${server}.nhentai.net/galleries/${currentGalleryID}/`;
+
+      for (let page = startPage + 1; page <= endPage; page++) {
+        let img = document.createElement('img');
+        img.alt = `${chapterName} - Page ${page}`;
+        
+        for (let format of formats) {
+          let testSrc = `${baseUrl}${page}.${format}`;
+          if (await checkImageExists(testSrc)) {
+            img.src = testSrc;
+            container.appendChild(img);
+            imageElements.push({ chapter: chapterName, src: testSrc });
+            break;
+          }
+        }
+      }
+    }
+
+    async function detectServer(galleryId) {
+      const servers = ["i3", "i6", "i9"];
+      const formats = ["jpg", "png", "webp"];
+      const testUrls = [];
+
+      for (let server of servers) {
+        for (let format of formats) {
+          testUrls.push({ url: `https://${server}.nhentai.net/galleries/${galleryId}/1.${format}`, server });
+        }
+      }
+
+      const checks = await Promise.allSettled(
+        testUrls.map(item => checkImageExists(item.url).then(ok => ({ ok, ...item })))
+      );
+
+      for (let result of checks) {
+        if (result.status === "fulfilled" && result.value.ok) {
+          return result.value.server;
+        }
+      }
+
+      return null;
+    }
+
+    function checkImageExists(url) {
+      return new Promise((resolve) => {
+        let img = new Image();
+        img.src = url;
+        img.onload = () => resolve(true);
+        img.onerror = () => resolve(false);
+      });
+    }
+
+    async function downloadPDF() {
+      if (imageElements.length === 0) {
+        alert("No chapters loaded. Please load at least one.");
+        return;
+      }
+
+      const status = document.getElementById('status');
+      status.textContent = "Generating PDF...";
+      
+      const { jsPDF } = window.jspdf;
+      let pdf = new jsPDF('p', 'mm', 'a4');
+      let pageWidth = 210;
+      let pageHeight = 297;
+
+      let currentChapter = "";
+      for (let i = 0; i < imageElements.length; i++) {
+        let { chapter, src } = imageElements[i];
+
+        if (chapter !== currentChapter) {
+          if (i > 0) pdf.addPage();
+          pdf.setFontSize(20);
+          pdf.text(chapter, 10, 20);
+          pdf.addPage();
+          currentChapter = chapter;
+        }
+
+        let img = await loadImage(src);
+        let ratio = img.width / img.height;
+        let imgHeight = pageWidth / ratio;
+        if (imgHeight > pageHeight) {
+          imgHeight = pageHeight;
+          pageWidth = pageHeight * ratio;
+        }
+
+        pdf.addImage(img, 'JPEG', 0, 0, pageWidth, imgHeight);
+        if (i < imageElements.length - 1) pdf.addPage();
+
+        status.textContent = `Processing ${i + 1} of ${imageElements.length} pages...`;
+      }
+
+      pdf.save("Chapters.pdf");
+      status.textContent = "PDF Downloaded!";
+    }
+
+    function loadImage(url) {
+      return new Promise((resolve) => {
+        let img = new Image();
+        img.crossOrigin = "Anonymous";
+        img.onload = () => resolve(img);
+        img.src = url;
+      });
+    }
+  </script>
+</body>
+</html>
