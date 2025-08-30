@@ -1,0 +1,331 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Chapters Viewer & PDF Converter</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      margin: 0;
+      padding: 0;
+      background-color: #121212;
+      color: #ffffff;
+      text-align: center;
+    }
+    .container {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      width: 100%;
+    }
+    img {
+      max-width: 100%;
+      height: auto;
+      margin-bottom: 5px;
+      box-shadow: 0 2px 4px rgba(0, 0, 0, 0.8);
+    }
+    h1 {
+      margin: 20px;
+      font-size: 24px;
+      color: #f5f5f5;
+    }
+    h2.chapter-title {
+      margin: 30px 0 15px;
+      font-size: 20px;
+      color: #ffcc00;
+    }
+    input, button {
+      margin: 8px;
+      padding: 10px;
+      font-size: 16px;
+      border-radius: 5px;
+      border: none;
+    }
+    input {
+      width: 80%;
+      max-width: 400px;
+    }
+    button {
+      background: #ff4081;
+      color: white;
+      cursor: pointer;
+    }
+    button:hover {
+      background: #e91e63;
+    }
+    .chapter-form {
+      margin-bottom: 15px;
+    }
+    #status {
+      margin-top: 10px;
+      color: #00e676;
+    }
+    /* Loading spinner */
+    .spinner {
+      border: 6px solid rgba(255, 255, 255, 0.2);
+      border-top: 6px solid #ff4081;
+      border-radius: 50%;
+      width: 50px;
+      height: 50px;
+      animation: spin 1s linear infinite;
+      margin: 20px auto;
+      display: none;
+    }
+    @keyframes spin {
+      0% { transform: rotate(0deg); }
+      100% { transform: rotate(360deg); }
+    }
+    /* Floating button */
+    #backToTop {
+      position: fixed;
+      bottom: 20px;
+      right: 20px;
+      background: #ff4081;
+      color: white;
+      border: none;
+      padding: 15px;
+      border-radius: 50%;
+      font-size: 18px;
+      cursor: pointer;
+      display: none;
+      box-shadow: 0 4px 6px rgba(0,0,0,0.5);
+    }
+    #backToTop:hover {
+      background: #e91e63;
+    }
+    .end-message {
+      margin: 20px;
+      font-size: 18px;
+      color: #00e676;
+      font-style: italic;
+    }
+  </style>
+</head>
+<body>
+  <h1>Chapters Viewer</h1>
+  
+  <div class="chapter-form">
+    <input type="text" id="userInput" placeholder="Enter Sauce Number eg (665565) "><br>
+    <input type="number" id="startPage" placeholder="Start Page (default 1)"><br>
+    <input type="number" id="endPage" placeholder="Total Page (auto-filled)" required><br>
+    
+    <button onclick="loadChapter()">Load Chapter</button>
+    <button onclick="clearChapters()">Clear</button>
+  </div>
+  
+  <button onclick="downloadPDF()">Download All as PDF</button>
+  <p id="status"></p>
+  <div class="spinner" id="spinner"></div>
+
+  <div class="container" id="imageContainer">
+    <h2>Enter ID and wait a moment...</h2>
+  </div>
+
+  <!-- Floating Back to Top button -->
+  <button id="backToTop" onclick="scrollToTop()">↑</button>
+
+  <script>
+    let imageElements = [];
+    let chapterCounter = 0;
+    let currentGalleryID = "";
+    let serverCache = {}; // cache servers by gallery ID
+
+    // Auto-fetch when user enters/pastes ID
+    document.getElementById("userInput").addEventListener("input", async function () {
+      const input = this.value.trim();
+      let code = input.replace(/[^0-9]/g, "");
+      
+      if (code.length >= 6) { // only when we have 6+ digits
+        try {
+          const proxy = "https://api.allorigins.win/raw?url=";
+          const apiUrl = `https://nhentai.net/api/gallery/${code}`;
+          const res = await fetch(proxy + encodeURIComponent(apiUrl));
+          if (!res.ok) throw new Error("API request failed");
+
+          const data = await res.json();
+          currentGalleryID = data.media_id;
+          const totalPages = data.num_pages;
+
+          const startPageInput = document.getElementById('startPage');
+          const endPageInput = document.getElementById('endPage');
+
+          if (!startPageInput.value) startPageInput.value = 1; // default page 1
+          endPageInput.value = totalPages; // always show max total pages
+        } catch (err) {
+          console.error("Failed to fetch gallery data", err);
+        }
+      }
+    });
+
+    async function loadChapter() {
+      const container = document.getElementById('imageContainer');
+      const startPage = parseInt(document.getElementById('startPage').value) || 1;
+      const endPage = parseInt(document.getElementById('endPage').value);
+
+      if (!currentGalleryID || isNaN(endPage) || endPage < startPage) {
+        alert("Please enter valid details.");
+        return;
+      }
+
+      document.getElementById("spinner").style.display = "block";
+
+      // detect & cache server for this gallery
+      let server = serverCache[currentGalleryID];
+      if (!server) {
+        server = await detectServer(currentGalleryID);
+        if (!server) {
+          alert("Could not detect server for this gallery.");
+          document.getElementById("spinner").style.display = "none";
+          return;
+        }
+        serverCache[currentGalleryID] = server;
+      }
+
+      chapterCounter++;
+      let chapterName = `Chapter ${chapterCounter}`;
+      let heading = document.createElement("h2");
+      heading.className = "chapter-title";
+      heading.textContent = chapterName;
+      container.appendChild(heading);
+
+      const formats = ["jpg", "png", "webp"];
+      const baseUrl = `https://${server}.nhentai.net/galleries/${currentGalleryID}/`;
+
+      for (let page = startPage; page <= endPage; page++) {
+        let img = document.createElement('img');
+        img.alt = `${chapterName} - Page ${page}`;
+        
+        for (let format of formats) {
+          let testSrc = `${baseUrl}${page}.${format}`;
+          if (await checkImageExists(testSrc)) {
+            img.src = testSrc;
+            container.appendChild(img);
+            imageElements.push({ chapter: chapterName, src: testSrc });
+            break;
+          }
+        }
+      }
+
+      // End message
+      let endMsg = document.createElement("div");
+      endMsg.className = "end-message";
+      endMsg.textContent = "--- End of Chapter ---";
+      container.appendChild(endMsg);
+
+      document.getElementById("spinner").style.display = "none";
+    }
+
+    async function detectServer(galleryId) {
+      const servers = ["i3", "i6", "i7", "i8", "i9"];
+      const formats = ["jpg", "png", "webp"];
+      const testUrls = [];
+
+      for (let server of servers) {
+        for (let format of formats) {
+          testUrls.push({ url: `https://${server}.nhentai.net/galleries/${galleryId}/1.${format}`, server });
+        }
+      }
+
+      const checks = await Promise.allSettled(
+        testUrls.map(item => checkImageExists(item.url).then(ok => ({ ok, ...item })))
+      );
+
+      for (let result of checks) {
+        if (result.status === "fulfilled" && result.value.ok) {
+          return result.value.server;
+        }
+      }
+
+      return null;
+    }
+
+    function checkImageExists(url) {
+      return new Promise((resolve) => {
+        let img = new Image();
+        img.src = url;
+        img.onload = () => resolve(true);
+        img.onerror = () => resolve(false);
+      });
+    }
+
+    async function downloadPDF() {
+      if (imageElements.length === 0) {
+        alert("No chapters loaded. Please load at least one.");
+        return;
+      }
+
+      const status = document.getElementById('status');
+      status.textContent = "Generating PDF...";
+      
+      const { jsPDF } = window.jspdf;
+      let pdf = new jsPDF('p', 'mm', 'a4');
+      let pageWidth = 210;
+      let pageHeight = 297;
+
+      let currentChapter = "";
+      for (let i = 0; i < imageElements.length; i++) {
+        let { chapter, src } = imageElements[i];
+
+        if (chapter !== currentChapter) {
+          if (i > 0) pdf.addPage();
+          pdf.setFontSize(20);
+          pdf.text(chapter, 10, 20);
+          pdf.addPage();
+          currentChapter = chapter;
+        }
+
+        let img = await loadImage(src);
+        let ratio = img.width / img.height;
+        let imgWidth = pageWidth;
+        let imgHeight = pageWidth / ratio;
+
+        if (imgHeight > pageHeight) {
+          imgHeight = pageHeight;
+          imgWidth = pageHeight * ratio;
+        }
+
+        let format = src.endsWith(".png") ? "PNG" : "JPEG";
+        pdf.addImage(img, format, 0, 0, imgWidth, imgHeight);
+        if (i < imageElements.length - 1) pdf.addPage();
+
+        status.textContent = `Processing ${i + 1} of ${imageElements.length} pages...`;
+      }
+
+      pdf.save("Chapters.pdf");
+      status.textContent = "PDF Downloaded!";
+    }
+
+    function loadImage(url) {
+      return new Promise((resolve) => {
+        let img = new Image();
+        img.crossOrigin = "Anonymous";
+        img.onload = () => resolve(img);
+        img.src = url;
+      });
+    }
+
+    function clearChapters() {
+      document.getElementById('imageContainer').innerHTML = "<h2>Cleared! Enter new ID...</h2>";
+      imageElements = [];
+      chapterCounter = 0;
+      currentGalleryID = "";
+      document.getElementById('status').textContent = "";
+    }
+
+    // Floating button logic
+    window.onscroll = function() {
+      const btn = document.getElementById("backToTop");
+      if (document.body.scrollTop > 200 || document.documentElement.scrollTop > 200) {
+        btn.style.display = "block";
+      } else {
+        btn.style.display = "none";
+      }
+    };
+    function scrollToTop() {
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+  </script>
+</body>
+</html>
