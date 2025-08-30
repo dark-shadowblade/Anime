@@ -62,24 +62,69 @@
       margin-top: 10px;
       color: #00e676;
     }
+    /* Loading spinner */
+    .spinner {
+      border: 6px solid rgba(255, 255, 255, 0.2);
+      border-top: 6px solid #ff4081;
+      border-radius: 50%;
+      width: 50px;
+      height: 50px;
+      animation: spin 1s linear infinite;
+      margin: 20px auto;
+      display: none;
+    }
+    @keyframes spin {
+      0% { transform: rotate(0deg); }
+      100% { transform: rotate(360deg); }
+    }
+    /* Floating button */
+    #backToTop {
+      position: fixed;
+      bottom: 20px;
+      right: 20px;
+      background: #ff4081;
+      color: white;
+      border: none;
+      padding: 15px;
+      border-radius: 50%;
+      font-size: 18px;
+      cursor: pointer;
+      display: none;
+      box-shadow: 0 4px 6px rgba(0,0,0,0.5);
+    }
+    #backToTop:hover {
+      background: #e91e63;
+    }
+    .end-message {
+      margin: 20px;
+      font-size: 18px;
+      color: #00e676;
+      font-style: italic;
+    }
   </style>
 </head>
 <body>
   <h1>Chapters Viewer</h1>
   
   <div class="chapter-form">
-    <input type="text" id="userInput" placeholder="Enter Sauce Number eg (#665565) "><br>
-    <input type="number" id="startPage" placeholder="Start Page (default 0)" value="0"><br>
+    <input type="text" id="userInput" placeholder="Enter Sauce Number eg (665565) "><br>
+    <input type="number" id="startPage" placeholder="Start Page (default 1)"><br>
     <input type="number" id="endPage" placeholder="Total Page (auto-filled)" required><br>
-    <button onclick="prepareChapter()">Load Chapter</button>
+    
+    <button onclick="loadChapter()">Load Chapter</button>
+    <button onclick="clearChapters()">Clear</button>
   </div>
   
   <button onclick="downloadPDF()">Download All as PDF</button>
   <p id="status"></p>
+  <div class="spinner" id="spinner"></div>
 
   <div class="container" id="imageContainer">
-    <h2>Enter details and click 'Load Chapter'</h2>
+    <h2>Enter ID and wait a moment...</h2>
   </div>
+
+  <!-- Floating Back to Top button -->
+  <button id="backToTop" onclick="scrollToTop()">↑</button>
 
   <script>
     let imageElements = [];
@@ -87,42 +132,36 @@
     let currentGalleryID = "";
     let serverCache = {}; // cache servers by gallery ID
 
-    async function prepareChapter() {
-      const input = document.getElementById('userInput').value.trim();
-      if (!input) {
-        alert("Please enter a nhentai link or gallery ID.");
-        return;
+    // Auto-fetch when user enters/pastes ID
+    document.getElementById("userInput").addEventListener("input", async function () {
+      const input = this.value.trim();
+      let code = input.replace(/[^0-9]/g, "");
+      
+      if (code.length >= 6) { // only when we have 6+ digits
+        try {
+          const proxy = "https://api.allorigins.win/raw?url=";
+          const apiUrl = `https://nhentai.net/api/gallery/${code}`;
+          const res = await fetch(proxy + encodeURIComponent(apiUrl));
+          if (!res.ok) throw new Error("API request failed");
+
+          const data = await res.json();
+          currentGalleryID = data.media_id;
+          const totalPages = data.num_pages;
+
+          const startPageInput = document.getElementById('startPage');
+          const endPageInput = document.getElementById('endPage');
+
+          if (!startPageInput.value) startPageInput.value = 1; // default page 1
+          endPageInput.value = totalPages; // always show max total pages
+        } catch (err) {
+          console.error("Failed to fetch gallery data", err);
+        }
       }
-
-      let code = input.replace(/[^0-9]/g, ""); 
-      if (!code) {
-        alert("Invalid input.");
-        return;
-      }
-
-      try {
-        const proxy = "https://api.allorigins.win/raw?url=";
-        const apiUrl = `https://nhentai.net/api/gallery/${code}`;
-        const res = await fetch(proxy + encodeURIComponent(apiUrl));
-        if (!res.ok) throw new Error("API request failed");
-
-        const data = await res.json();
-        currentGalleryID = data.media_id;
-        const totalPages = data.num_pages;
-
-        document.getElementById('startPage').value = 0;
-        document.getElementById('endPage').value = totalPages;
-
-        loadChapter();
-      } catch (err) {
-        alert("Failed to fetch gallery data.");
-        console.error(err);
-      }
-    }
+    });
 
     async function loadChapter() {
       const container = document.getElementById('imageContainer');
-      const startPage = parseInt(document.getElementById('startPage').value) || 0;
+      const startPage = parseInt(document.getElementById('startPage').value) || 1;
       const endPage = parseInt(document.getElementById('endPage').value);
 
       if (!currentGalleryID || isNaN(endPage) || endPage < startPage) {
@@ -130,12 +169,15 @@
         return;
       }
 
+      document.getElementById("spinner").style.display = "block";
+
       // detect & cache server for this gallery
       let server = serverCache[currentGalleryID];
       if (!server) {
         server = await detectServer(currentGalleryID);
         if (!server) {
           alert("Could not detect server for this gallery.");
+          document.getElementById("spinner").style.display = "none";
           return;
         }
         serverCache[currentGalleryID] = server;
@@ -151,7 +193,7 @@
       const formats = ["jpg", "png", "webp"];
       const baseUrl = `https://${server}.nhentai.net/galleries/${currentGalleryID}/`;
 
-      for (let page = startPage + 1; page <= endPage; page++) {
+      for (let page = startPage; page <= endPage; page++) {
         let img = document.createElement('img');
         img.alt = `${chapterName} - Page ${page}`;
         
@@ -165,10 +207,18 @@
           }
         }
       }
+
+      // End message
+      let endMsg = document.createElement("div");
+      endMsg.className = "end-message";
+      endMsg.textContent = "--- End of Chapter ---";
+      container.appendChild(endMsg);
+
+      document.getElementById("spinner").style.display = "none";
     }
 
     async function detectServer(galleryId) {
-      const servers = ["i3", "i6", "i9"];
+      const servers = ["i3", "i6", "i7", "i8", "i9"];
       const formats = ["jpg", "png", "webp"];
       const testUrls = [];
 
@@ -228,13 +278,16 @@
 
         let img = await loadImage(src);
         let ratio = img.width / img.height;
+        let imgWidth = pageWidth;
         let imgHeight = pageWidth / ratio;
+
         if (imgHeight > pageHeight) {
           imgHeight = pageHeight;
-          pageWidth = pageHeight * ratio;
+          imgWidth = pageHeight * ratio;
         }
 
-        pdf.addImage(img, 'JPEG', 0, 0, pageWidth, imgHeight);
+        let format = src.endsWith(".png") ? "PNG" : "JPEG";
+        pdf.addImage(img, format, 0, 0, imgWidth, imgHeight);
         if (i < imageElements.length - 1) pdf.addPage();
 
         status.textContent = `Processing ${i + 1} of ${imageElements.length} pages...`;
@@ -251,6 +304,27 @@
         img.onload = () => resolve(img);
         img.src = url;
       });
+    }
+
+    function clearChapters() {
+      document.getElementById('imageContainer').innerHTML = "<h2>Cleared! Enter new ID...</h2>";
+      imageElements = [];
+      chapterCounter = 0;
+      currentGalleryID = "";
+      document.getElementById('status').textContent = "";
+    }
+
+    // Floating button logic
+    window.onscroll = function() {
+      const btn = document.getElementById("backToTop");
+      if (document.body.scrollTop > 200 || document.documentElement.scrollTop > 200) {
+        btn.style.display = "block";
+      } else {
+        btn.style.display = "none";
+      }
+    };
+    function scrollToTop() {
+      window.scrollTo({ top: 0, behavior: 'smooth' });
     }
   </script>
 </body>
