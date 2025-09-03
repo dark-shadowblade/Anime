@@ -68,7 +68,7 @@
   <h1>Chapters Viewer</h1>
   <div class="chapter-form">
     <input type="text" id="baseUrl" placeholder="Base URL (link of the image)" required><br>
-    <input type="number" id="startPage" placeholder="Start Page (default 0)" value="0"><br>
+    <input type="number" id="startPage" placeholder="Start Page (default 1)" value="1"><br>
     <input type="number" id="endPage" placeholder="End Page (e.g., 50)" required><br>
     <button onclick="loadChapter()">Load Chapter</button>
   </div>
@@ -87,10 +87,9 @@
       const container = document.getElementById('imageContainer');
       let baseUrl = document.getElementById('baseUrl').value.trim();
 
-      // Add trailing slash if missing
       if (!baseUrl.endsWith("/")) baseUrl += "/";
 
-      const startPage = parseInt(document.getElementById('startPage').value) || 0;
+      const startPage = parseInt(document.getElementById('startPage').value) || 1;
       const endPage = parseInt(document.getElementById('endPage').value);
       const formats = ["jpg", "jpeg", "png", "webp"];
 
@@ -109,15 +108,28 @@
       for (let page = startPage; page <= endPage; page++) {
         let img = document.createElement('img');
         img.alt = `${chapterName} - Page ${page}`;
+        let loaded = false;
 
-        for (let format of formats) {
-          let testSrc = `${baseUrl}${page}.${format}`;
-          if (await checkImageExists(testSrc)) {
-            img.src = testSrc;
-            container.appendChild(img);
-            imageElements.push({ chapter: chapterName, src: testSrc });
-            break;
+        // Try different zero paddings
+        let pageNumbers = [
+          String(page),                     // 1
+          page.toString().padStart(2, "0"), // 01
+          page.toString().padStart(3, "0"), // 001
+          page.toString().padStart(4, "0")  // 0001
+        ];
+
+        for (let num of pageNumbers) {
+          for (let format of formats) {
+            let testSrc = `${baseUrl}${num}.${format}`;
+            if (await checkImageExists(testSrc)) {
+              img.src = testSrc;
+              container.appendChild(img);
+              imageElements.push({ chapter: chapterName, src: testSrc });
+              loaded = true;
+              break;
+            }
           }
+          if (loaded) break;
         }
       }
     }
@@ -153,19 +165,25 @@
           if (i > 0) pdf.addPage();
           pdf.setFontSize(20);
           pdf.text(chapter, 10, 20);
-          pdf.addPage();
           currentChapter = chapter;
+          pdf.addPage();
         }
 
         let img = await loadImage(src);
         let ratio = img.width / img.height;
-        let imgHeight = pageWidth / ratio;
+        let imgWidth = pageWidth;
+        let imgHeight = imgWidth / ratio;
+
         if (imgHeight > pageHeight) {
           imgHeight = pageHeight;
-          pageWidth = pageHeight * ratio;
+          imgWidth = imgHeight * ratio;
         }
 
-        pdf.addImage(img, 'JPEG', 0, 0, pageWidth, imgHeight);
+        let x = (pageWidth - imgWidth) / 2;
+        let y = (pageHeight - imgHeight) / 2;
+
+        pdf.addImage(img, 'JPEG', x, y, imgWidth, imgHeight);
+
         if (i < imageElements.length - 1) pdf.addPage();
 
         status.textContent = `Processing ${i + 1} of ${imageElements.length} pages...`;
