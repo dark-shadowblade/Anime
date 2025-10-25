@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>NHentai Gallery Loader - final05</title>
+<style>
+  body { font-family: Arial, sans-serif; background-color: #121212; color: #ffffff; text-align: center; margin: 0; padding: 0; }
+  .container { display: flex; flex-direction: column; align-items: center; width: 100%; }
+  img { max-width: 100%; height: auto; margin-bottom: 5px; box-shadow: 0 2px 4px rgba(0,0,0,0.8); }
+  input, button { margin: 8px; padding: 10px; font-size: 16px; border-radius: 5px; border: none; }
+  input { width: 80%; max-width: 400px; }
+  button { background: #ff4081; color: white; cursor: pointer; }
+  button:hover { background: #e91e63; }
+  .spinner { border: 6px solid rgba(255,255,255,0.2); border-top: 6px solid #ff4081; border-radius: 50%; width: 50px; height: 50px; animation: spin 1s linear infinite; margin: 20px auto; display: none; }
+  @keyframes spin { 0% { transform: rotate(0deg);} 100% { transform: rotate(360deg);} }
+  #statusIndicator { position: fixed; bottom: 15px; right: 15px; background: rgba(255,255,255,0.5); color: black; padding: 8px 12px; border-radius: 50px; font-size: 16px; display: none; pointer-events: none; z-index: 9999; }
+  #toTopBtn { position: fixed; bottom: 15px; left: 15px; background: rgba(255, 255, 255, 0.2); color: #121212; border: none; padding: 10px 14px; border-radius: 25px; font-size: 16px; cursor: pointer; z-index: 9999; font-weight: bold; box-shadow: 0 2px 5px rgba(0,0,0,0.4); }
+  #toTopBtn:hover { background: rgba(255,255,255,0.9); }
+
+  /* Small main link button next to N.X */
+  #mainLinkBtn {
+    margin-left: 10px;
+    padding: 6px 10px;
+    font-size: 14px;
+    background: rgba(255,255,255,0.2);
+    color: #ffcc00;
+    border-radius: 5px;
+    text-decoration: none;
+    font-weight: bold;
+    transition: background 0.3s;
+  }
+  #mainLinkBtn:hover { background: rgba(255,255,255,0.4); }
+</style>
+</head>
+<body>
+<p id="welcomeText" style="font-size:18px; font-weight:bold; color:#ffcc00; margin-top:10px;">
+  N.X
+  <a id="mainLinkBtn" href="https://www.hrllo.com" target="_blank">Main</a>
+</p>
+
+<div class="inputs">
+  <input type="text" id="galleryID" placeholder="Enter ID"><br>
+  <input type="number" id="startPage" placeholder="Start Page (default 1)">
+  <input type="number" id="endPage" placeholder="End Page"><br>
+  <button onclick="fetchPages()">Fetch Pages</button>
+  <button onclick="loadImages()">Load Images</button>
+  <button onclick="clearChapters()">Clear All</button>
+</div>
+
+<div class="spinner" id="spinner"></div>
+<div class="container" id="imageContainer"><h2>Enter ID</h2></div>
+
+<div id="statusIndicator">⏳ Loading...</div>
+<button id="toTopBtn" onclick="window.scrollTo({top:0, behavior:'smooth'})">↑ 0</button>
+
+<script>
+let imageElements = [];
+let loading = false;
+let baseUrl = '';
+let totalPages = 0;
+let currentPage = 0;
+
+// Observe which image is currently visible
+const observer = new IntersectionObserver((entries) => {
+  entries.forEach(entry => {
+    if(entry.isIntersecting){
+      currentPage = entry.target.dataset.page;
+      document.getElementById('toTopBtn').textContent = `↑ ${currentPage}`;
+    }
+  });
+}, { root: null, rootMargin: "0px", threshold: 0.5 });
+
+async function fetchPages() {
+  const galleryID = document.getElementById('galleryID').value.trim();
+  if (!galleryID) return;
+
+  try {
+    const res = await fetch('https://api.allorigins.win/raw?url=' + encodeURIComponent(`https://nhentai.xxx/g/${galleryID}/`));
+    const html = await res.text();
+
+    // Regex for cover / thumb / t_ images
+    const coverMatch = html.match(/https:\/\/i\d\.nhentaimg\.com\/\d+\/[a-z0-9]+\/(?:cover|thumb|t_)\.(?:jpg|png|webp)/i);
+    if (!coverMatch) return;
+
+    const coverUrl = coverMatch[0];
+    baseUrl = coverUrl.replace(/(?:cover|thumb|t_)\.(?:jpg|png|webp)/i, '');
+
+    // Total pages
+    const pagesMatch = html.match(/<span class="tag_name pages">(\d+)<\/span>/);
+    totalPages = pagesMatch ? parseInt(pagesMatch[1]) : 0;
+
+    if (!document.getElementById('startPage').value) document.getElementById('startPage').value = 1;
+    document.getElementById('endPage').value = totalPages;
+
+  } catch (err) {
+    console.error(err);
+  }
+}
+
+async function loadImages() {
+  const start = parseInt(document.getElementById('startPage').value) || 1;
+  const end = parseInt(document.getElementById('endPage').value);
+  if (!baseUrl || !end || end < start) return;
+
+  const container = document.getElementById('imageContainer');
+  loading = true;
+  const statusEl = document.getElementById('statusIndicator');
+  statusEl.style.display = 'block';
+
+  for (let i = start; i <= end; i++) {
+    if (!loading) break;
+    statusEl.textContent = `⏳ ${i}`;
+
+    const formats = ['jpg','png','webp'];
+    let imgLoaded = false;
+    for (let fmt of formats) {
+      const url = `${baseUrl}${i}.${fmt}`;
+      if (await checkImageExists(url)) {
+        const img = document.createElement('img');
+        img.src = url;
+        img.dataset.page = i;
+        container.appendChild(img);
+        imageElements.push(url);
+        observer.observe(img);
+        imgLoaded = true;
+        break;
+      }
+    }
+    if (!imgLoaded) console.log(`Page ${i} not found`);
+  }
+
+  // Chapter ended message
+  const chapterEnd = document.createElement('h3');
+  chapterEnd.textContent = "Chapter ended";
+  chapterEnd.style.color = "#ffcc00";
+  chapterEnd.style.margin = "15px 0";
+  container.appendChild(chapterEnd);
+
+  statusEl.textContent = '✅ Chapter loaded';
+  setTimeout(() => { statusEl.style.display = 'none'; }, 2000);
+  loading = false;
+}
+
+function clearChapters() {
+  loading = false;
+  document.getElementById('imageContainer').innerHTML = '<h2> </h2>';
+  imageElements = [];
+  document.getElementById('statusIndicator').style.display = 'none';
+  document.getElementById('toTopBtn').textContent = '↑ 0';
+}
+
+function checkImageExists(url) {
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.onload = () => resolve(true);
+    img.onerror = () => resolve(false);
+    img.src = url;
+  });
+}
+</script>
+</body>
+</html>
