@@ -1,0 +1,298 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Chapters Viewer</title>
+<style>
+  body {
+    font-family: Arial, sans-serif;
+    margin: 0;
+    padding: 0;
+    background-color: #121212;
+    color: #ffffff;
+    text-align: center;
+  }
+  .header {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin: 10px;
+    gap: 10px;
+  }
+  .header-text {
+    font-size: 20px;
+    font-weight: bold;
+    color: #ffcc00;
+  }
+  #mainLinkBtn {
+    margin-left: 10px;
+    padding: 6px 10px;
+    font-size: 14px;
+    background: rgba(255,255,255,0.2);
+    color: #ffcc00;
+    border-radius: 5px;
+    text-decoration: none;
+    font-weight: bold;
+    transition: background 0.3s;
+  }
+  #mainLinkBtn:hover { background: rgba(255,255,255,0.4); }
+
+  .container {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    width: 100%;
+  }
+  img {
+    max-width: 100%;
+    height: auto;
+    margin-bottom: 5px;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.8);
+  }
+  input, button {
+    margin: 8px;
+    padding: 10px;
+    font-size: 16px;
+    border-radius: 5px;
+    border: none;
+  }
+  input {
+    width: 80%;
+    max-width: 400px;
+  }
+  button {
+    background: #ff4081;
+    color: white;
+    cursor: pointer;
+  }
+  button:hover { background: #e91e63; }
+
+  .chapter-form {
+    margin-bottom: 15px;
+  }
+
+  /* Bottom-right page loader */
+  #loadingPage {
+    position: fixed;
+    bottom: 15px;
+    right: 15px;
+    background: rgba(255,255,255,0.5);
+    color: black;
+    padding: 8px 12px;
+    border-radius: 50px;
+    font-size: 16px;
+    display: none;
+    pointer-events: none;
+    z-index: 9999;
+  }
+
+  /* Elegant scroll-to-top button */
+  #toTopBtn {
+    position: fixed;
+    bottom: 60px;
+    left: 15px;
+    background: rgba(255, 255, 255, 0.7);
+    color: #121212;
+    border: none;
+    padding: 10px 14px;
+    border-radius: 25px;
+    font-size: 16px;
+    cursor: pointer;
+    z-index: 9999;
+    font-weight: bold;
+    box-shadow: 0 2px 5px rgba(0,0,0,0.4);
+  }
+  #toTopBtn:hover { background: rgba(255,255,255,0.9); }
+
+  .end-message {
+    margin: 20px;
+    font-size: 18px;
+    color: #00e676;
+    font-style: italic;
+  }
+</style>
+</head>
+<body>
+  <div class="header">
+    <div class="header-text">N.net</div>
+    <a id="mainLinkBtn" href="https://www.hrllo.com" target="_blank">Main</a>
+  </div>
+
+  <div class="chapter-form">
+    <input type="text" id="userInput" placeholder="Enter ID"><br>
+    <input type="number" id="startPage" placeholder="Start Page (default 1)"><br>
+    <input type="number" id="endPage" placeholder="Total Page (auto-filled)"><br>
+    <button onclick="loadChapter()">Load Chapter</button>
+    <button onclick="clearChapters()">Clear</button>
+  </div>
+
+  <div class="spinner" id="spinner"></div>
+  <div id="loadingPage"></div>
+  <div class="container" id="imageContainer"></div>
+
+  <button id="toTopBtn" onclick="window.scrollTo({top:0, behavior:'smooth'})">↑ 0</button>
+
+<script>
+let imageElements = [];
+let chapterCounter = 0;
+let currentGalleryID = "";
+let serverCache = {};
+let loadingStopped = false;
+
+// Auto-fetch gallery info when ID is entered
+document.getElementById("userInput").addEventListener("input", async function () {
+  const input = this.value.trim();
+  let code = input.replace(/[^0-9]/g, "");
+  
+  if (code.length >= 6) {
+    try {
+      const proxy = "https://api.allorigins.win/raw?url=";
+      const apiUrl = `https://nhentai.net/api/gallery/${code}`;
+      const res = await fetch(proxy + encodeURIComponent(apiUrl));
+      if (!res.ok) throw new Error("API request failed");
+
+      const data = await res.json();
+      currentGalleryID = data.media_id;
+      const totalPages = data.num_pages;
+
+      const startPageInput = document.getElementById('startPage');
+      const endPageInput = document.getElementById('endPage');
+
+      if (!startPageInput.value) startPageInput.value = 1;
+      endPageInput.value = totalPages;
+    } catch (err) {
+      console.error("Failed to fetch gallery data", err);
+    }
+  }
+});
+
+async function loadChapter() {
+  if (!currentGalleryID) return;
+
+  loadingStopped = false; // reset stop flag
+  const container = document.getElementById('imageContainer');
+  const startPage = parseInt(document.getElementById('startPage').value) || 1;
+  const endPage = parseInt(document.getElementById('endPage').value);
+
+  if (isNaN(endPage) || endPage < startPage) return;
+
+  document.getElementById("spinner").style.display = "block";
+  const loadingPage = document.getElementById("loadingPage");
+  loadingPage.style.display = "block";
+
+  let server = serverCache[currentGalleryID];
+  if (!server) {
+    server = await detectServer(currentGalleryID);
+    if (!server) {
+      alert("Could not detect server for this gallery.");
+      document.getElementById("spinner").style.display = "none";
+      loadingPage.style.display = "none";
+      return;
+    }
+    serverCache[currentGalleryID] = server;
+  }
+
+  chapterCounter++;
+  let chapterName = `Chapter ${chapterCounter}`;
+  let heading = document.createElement("h2");
+  heading.className = "chapter-title";
+  heading.textContent = chapterName;
+  container.appendChild(heading);
+
+  const formats = ["jpg", "png", "webp"];
+  const baseUrl = `https://${server}.nhentai.net/galleries/${currentGalleryID}/`;
+
+  for (let page = startPage; page <= endPage; page++) {
+    if (loadingStopped) break; // stop if cleared
+    loadingPage.textContent = `⏳ ${page}`;
+
+    let img = document.createElement('img');
+    img.alt = `${chapterName} - Page ${page}`;
+    img.dataset.page = page;
+
+    for (let format of formats) {
+      let testSrc = `${baseUrl}${page}.${format}`;
+      if (await checkImageExists(testSrc)) {
+        img.src = testSrc;
+        container.appendChild(img);
+        imageElements.push({ chapter: chapterName, src: testSrc });
+        break;
+      }
+    }
+  }
+
+  let endMsg = document.createElement("div");
+  endMsg.className = "end-message";
+  endMsg.textContent = "--- End of Chapter ---";
+  container.appendChild(endMsg);
+
+  document.getElementById("spinner").style.display = "none";
+  loadingPage.style.display = "none";
+}
+
+// Server detection
+async function detectServer(galleryId) {
+  const servers = ["i3","i6","i7","i8","i9"];
+  const formats = ["jpg","png","webp"];
+  const testUrls = [];
+
+  for (let server of servers) {
+    for (let format of formats) {
+      testUrls.push({ url: `https://${server}.nhentai.net/galleries/${galleryId}/1.${format}`, server });
+    }
+  }
+
+  const checks = await Promise.allSettled(
+    testUrls.map(item => checkImageExists(item.url).then(ok => ({ ok, ...item })))
+  );
+
+  for (let result of checks) {
+    if (result.status === "fulfilled" && result.value.ok) return result.value.server;
+  }
+
+  return null;
+}
+
+function checkImageExists(url) {
+  return new Promise(resolve => {
+    let img = new Image();
+    img.src = url;
+    img.onload = () => resolve(true);
+    img.onerror = () => resolve(false);
+  });
+}
+
+// Clear button stops loading and clears images
+function clearChapters() {
+  loadingStopped = true; // stop ongoing loading
+  document.getElementById('imageContainer').innerHTML = "";
+  imageElements = [];
+  chapterCounter = 0;
+  document.getElementById("spinner").style.display = "none";
+  document.getElementById("loadingPage").style.display = "none";
+}
+
+// Top button logic
+const observerOptions = { root: null, rootMargin: "0px", threshold: 0.5 };
+const observer = new IntersectionObserver((entries) => {
+  entries.forEach(entry => {
+    if(entry.isIntersecting){
+      const currentPage = entry.target.dataset.page;
+      document.getElementById('toTopBtn').textContent = `↑ ${currentPage}`;
+    }
+  });
+}, observerOptions);
+
+function scrollToTop() {
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+
+// Observe images after adding
+const containerObserver = new MutationObserver(() => {
+  document.querySelectorAll('#imageContainer img').forEach(img => observer.observe(img));
+});
+containerObserver.observe(document.getElementById('imageContainer'), { childList: true, subtree: true });
+</script>
+</body>
+</html>
