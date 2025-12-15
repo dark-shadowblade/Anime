@@ -1,33 +1,106 @@
+
 <!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Chapters Viewer</title>
+
 <style>
-body { font-family: Arial, sans-serif; margin:0; padding:0; background:#121212; color:#fff; text-align:center; }
-.container { display:flex; flex-direction:column; align-items:center; width:100%; }
-img { max-width:100%; height:auto; margin-bottom:5px; box-shadow:0 2px 4px rgba(0,0,0,0.8); }
-h1 { margin:20px; font-size:24px; color:#f5f5f5; }
-h2.chapter-title { margin:30px 0 15px; font-size:20px; color:#ffcc00; }
-input,button { margin:8px; padding:10px; font-size:16px; border-radius:5px; border:none; }
-input { width:80%; max-width:400px; }
-button { background:#ff4081; color:white; cursor:pointer; }
-button:hover { background:#e91e63; }
-.chapter-form { margin-bottom:15px; }
-#status { margin-top:10px; color:#00e676; }
-#errors { margin-top:10px; color:#ff5252; white-space:pre-wrap; }
-.spinner { border:6px solid rgba(255,255,255,0.2); border-top:6px solid #ff4081; border-radius:50%; width:50px; height:50px; animation:spin 1s linear infinite; margin:20px auto; display:none; }
-@keyframes spin {0%{transform:rotate(0deg);}100%{transform:rotate(360deg);}}
+body {
+  font-family: Arial, sans-serif;
+  margin: 0;
+  padding: 0;
+  background: #121212;
+  color: #fff;
+  text-align: center;
+}
+
+.container {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: 100%;
+}
+
+img {
+  max-width: 100%;
+  height: auto;
+  margin-bottom: 5px;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.8);
+}
+
+h1 {
+  margin: 20px;
+  font-size: 24px;
+}
+
+h2.chapter-title {
+  margin: 30px 0 15px;
+  font-size: 20px;
+  color: #ffcc00;
+}
+
+input, button {
+  margin: 8px;
+  padding: 10px;
+  font-size: 16px;
+  border-radius: 5px;
+  border: none;
+}
+
+input {
+  width: 80%;
+  max-width: 400px;
+}
+
+button {
+  background: #ff4081;
+  color: white;
+  cursor: pointer;
+}
+
+button:hover {
+  background: #e91e63;
+}
+
+#status {
+  margin-top: 10px;
+  color: #00e676;
+}
+
+#errors {
+  margin-top: 10px;
+  color: #ff5252;
+  white-space: pre-wrap;
+}
+
+.spinner {
+  border: 6px solid rgba(255,255,255,0.2);
+  border-top: 6px solid #ff4081;
+  border-radius: 50%;
+  width: 50px;
+  height: 50px;
+  animation: spin 1s linear infinite;
+  margin: 20px auto;
+  display: none;
+}
+
+@keyframes spin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
 </style>
 </head>
+
 <body>
+
 <h1>Chapters Viewer</h1>
 
 <div class="chapter-form">
-  <input type="text" id="baseUrl" placeholder="Enter Base URL ending with /" required><br>
-  <input type="text" id="startPage" placeholder="Start Page (e.g., 001)" value="1"><br>
-  <input type="number" id="endPage" placeholder="End Page" required><br>
+  <input type="text" id="baseUrl" placeholder="Base URL ending with /"><br>
+  <input type="number" id="startPage" value="1"><br>
+  <input type="number" id="endPage" placeholder="End Page"><br>
   <button onclick="loadChapter()">Load Chapter</button>
 </div>
 
@@ -36,84 +109,71 @@ button:hover { background:#e91e63; }
 <div class="spinner" id="spinner"></div>
 
 <div class="container" id="imageContainer">
-  <h2>Enter details and click 'Load Chapter'</h2>
+  <h2>Enter details and click Load Chapter</h2>
 </div>
 
 <script>
 let chapterCounter = 0;
-let imageElements = [];
 
-// Check if image exists
-function checkImageExists(url){
-  return new Promise(resolve=>{
-    const img = new Image();
-    img.src = url + "?t=" + new Date().getTime();
-    img.onload = () => resolve(true);
-    img.onerror = () => resolve(false);
-  });
-}
+function loadChapter() {
+  const container = document.getElementById("imageContainer");
+  const status = document.getElementById("status");
+  const errors = document.getElementById("errors");
+  const spinner = document.getElementById("spinner");
 
-// Load chapter with zero-padding
-async function loadChapter() {
-  const container = document.getElementById('imageContainer');
-  const status = document.getElementById('status');
-  const errors = document.getElementById('errors');
   errors.textContent = "";
   status.textContent = "";
-  document.getElementById("spinner").style.display = "block";
+  spinner.style.display = "block";
 
-  let baseUrl = document.getElementById('baseUrl').value.trim();
+  let baseUrl = document.getElementById("baseUrl").value.trim();
+  let startPage = parseInt(document.getElementById("startPage").value);
+  let endPage = parseInt(document.getElementById("endPage").value);
+
   if (!baseUrl.endsWith("/")) baseUrl += "/";
 
-  let startInput = document.getElementById('startPage').value.trim();
-  let endPage = parseInt(document.getElementById('endPage').value);
-
-  if (!baseUrl || !startInput || isNaN(endPage) || endPage < parseInt(startInput)) {
+  if (!baseUrl || isNaN(startPage) || isNaN(endPage) || endPage < startPage) {
     alert("Enter valid details");
-    document.getElementById("spinner").style.display = "none";
+    spinner.style.display = "none";
     return;
   }
 
-  const padLength = startInput.length;
-  let startPage = parseInt(startInput);
-
   chapterCounter++;
   const chapterName = `Chapter ${chapterCounter}`;
+
   const heading = document.createElement("h2");
   heading.className = "chapter-title";
   heading.textContent = chapterName;
   container.appendChild(heading);
 
-  const formats = ["jpg","jpeg","png","webp"];
+  const formats = ["png", "jpg", "jpeg", "webp"];
 
-  for (let i = 0; i <= endPage - startPage; i++) {
-    const pageNum = (startPage + i).toString().padStart(padLength, "0");
-    status.textContent = `Loading page ${pageNum}...`;
-    let loaded = false;
+  for (let page = startPage; page <= endPage; page++) {
+    status.textContent = `Loading page ${page}...`;
 
-    for (let format of formats) {
-      const url = `${baseUrl}${pageNum}.${format}`;
-      if (await checkImageExists(url)) {
-        const img = document.createElement('img');
-        img.src = url;
-        img.alt = `${chapterName} - Page ${pageNum}`;
-        container.appendChild(img);
-        imageElements.push({ chapter: chapterName, src: url });
-        loaded = true;
-        break;
+    const img = document.createElement("img");
+    img.loading = "lazy";
+    img.alt = `${chapterName} - Page ${page}`;
+
+    let formatIndex = 0;
+
+    img.onerror = () => {
+      formatIndex++;
+      if (formatIndex < formats.length) {
+        img.src = `${baseUrl}${page}.${formats[formatIndex]}`;
+      } else {
+        errors.textContent += `❌ Failed page ${page}\n`;
       }
-    }
+    };
 
-    if (!loaded) {
-      const msg = `Error loading page ${pageNum}`;
-      console.warn(msg);
-      errors.textContent += msg + "\n";
-    }
+    // first attempt
+    img.src = `${baseUrl}${page}.${formats[0]}`;
+    container.appendChild(img);
   }
 
   status.textContent = `✅ Finished loading ${chapterName}`;
-  document.getElementById("spinner").style.display = "none";
+  spinner.style.display = "none";
 }
 </script>
+
 </body>
 </html>
